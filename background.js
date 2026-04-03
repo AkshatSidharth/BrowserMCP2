@@ -448,7 +448,7 @@ async function callOpenAI(apiKey, messages, extraTools = []) {
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4.1',
+      model: 'gpt-4.5',
       messages,
       tools,
       tool_choice: 'auto',
