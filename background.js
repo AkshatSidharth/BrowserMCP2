@@ -566,7 +566,9 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
 - For price-filtered tasks (e.g. "book under 500 rupees"): sort by "Price -- Low to High" first, then find the first matching item
 - To sort on Flipkart: click "Price -- Low to High" tab below the search bar
 - Prices appear as ₹499, Rs.500, 500 etc. — treat them the same; "under 500" means price < 500
-- To add to cart: click the product → wait for product page → click "Add to Cart" → verify cart updated
+- To add to cart: click the product → wait for product page → **scroll down** to find "Add to Cart" button (it is below delivery details on Flipkart) → click it → verify cart updated
+- On Flipkart product pages: scroll down at least 2 times to reveal "Add to Cart" / "ADD TO CART" button before giving up
+- The "Add to Cart" button on Flipkart may be a blue/yellow button below "Delivery details" — scroll until you see it then click it
 - If the first item isn't what's wanted, scroll down and try the next one
 - Do NOT give up after 1-2 scrolls — scroll multiple times and check each result
 - Quantity: if user says "only 1", ensure quantity shows 1 before adding
