@@ -550,6 +550,15 @@ async function callOpenAI(apiKey, messages, model, extraTools = []) {
   return resp.json();
 }
 
+// ─── Timeout wrapper ──────────────────────────────────────────────────────────
+
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 // ─── Agent loop ───────────────────────────────────────────────────────────────
 
 async function runAgentLoop(tabId, prompt, apiKey, model = 'gpt-4o') {
@@ -561,12 +570,12 @@ async function runAgentLoop(tabId, prompt, apiKey, model = 'gpt-4o') {
   let initialContent = { url: 'unknown', title: 'unknown', pageText: '', elements: [] };
   try {
     await sleep(400);
-    initialContent = await getTabContent(tabId) || initialContent;
+    initialContent = await withTimeout(getTabContent(tabId), 5000, initialContent) || initialContent;
   } catch (_) {}
 
   notify('thinking', 'Taking screenshot...');
   await sleep(300);
-  const initialScreenshot = await captureScreenshot(tabId);
+  const initialScreenshot = await withTimeout(captureScreenshot(tabId), 5000, null);
 
   const systemPrompt = `You are an expert AI browser agent controlling a real web browser.
 
@@ -669,7 +678,7 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
       if (toolName === 'screenshot') {
         notify('acting', 'Taking screenshot...');
         await sleep(600);
-        const dataUrl = await captureScreenshot(tabId);
+        const dataUrl = await withTimeout(captureScreenshot(tabId), 5000, null);
         if (dataUrl) {
           // Send screenshot as a vision message
           messages.push({
@@ -695,7 +704,7 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
         notify('acting', 'Reading page elements...');
         try {
           await sleep(500);
-          const fresh = await getTabContent(tabId);
+          const fresh = await withTimeout(getTabContent(tabId), 5000, { url: 'unknown', title: 'unknown', pageText: '', elements: [] });
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(fresh) });
         } catch (e) {
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: e.message }) });
@@ -707,7 +716,7 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
       notify('acting', formatActionMessage(toolName, params));
       let result;
       try {
-        result = await executeAction(tabId, toolName, params);
+        result = await withTimeout(executeAction(tabId, toolName, params), 8000, { success: false, error: 'Action timed out after 8s' });
         if (toolName === 'navigate') await sleep(2500);
         else if (toolName === 'click') await sleep(1200);
         else if (toolName === 'add_to_cart') await sleep(1500);
