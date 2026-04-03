@@ -5,7 +5,7 @@
 
 'use strict';
 
-const MAX_ITERATIONS = 20;
+const MAX_ITERATIONS = 30;
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
 // ─── OpenAI tool definitions ──────────────────────────────────────────────────
@@ -140,7 +140,7 @@ const BROWSER_TOOLS = [
     type: 'function',
     function: {
       name: 'finish',
-      description: 'Call when the task is done or truly cannot be completed.',
+      description: 'Call when the task is fully done, OR when you have genuinely exhausted all options (minimum 5 real action steps tried). Do NOT call this just because one attempt failed — retry with different selectors, scroll more, or try a different approach first.',
       parameters: {
         type: 'object',
         properties: {
@@ -509,7 +509,18 @@ CRITICAL — "my" means the LOGGED-IN user, NOT the currently viewed page:
 - Look for sidebar links like "Me", "My Profile", "Profile", or a user avatar/name in the top-right header that links to the logged-in user
 - The currently open page may be showing SOMEONE ELSE's profile — do NOT use that data for "my" requests
 - Always verify you are on the logged-in user's own page before reading their data
-- On HR tools like Keka, Darwinbox, etc: click "Me" in the left sidebar to get to the current user's own profile`;
+- On HR tools like Keka, Darwinbox, etc: click "Me" in the left sidebar to get to the current user's own profile
+
+E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
+- To search: click the search bar → type_text → press_key Enter → wait 2000ms → screenshot
+- After results load, use get_page_content to read ALL product names and prices
+- For price matching (e.g. "500 rupees book"): scroll down to see more results, read prices (₹499, ₹500, ₹525), pick the CLOSEST match
+- Prices appear as ₹499, Rs.500, 500 etc. — treat them the same
+- To add to cart: click the product → wait for product page to load → click "Add to Cart" → verify
+- If exact price not found, pick the closest and tell the user which one you chose
+- Do NOT give up after 1-2 scrolls — scroll multiple times to see all results
+- Quantity: if user says "only 1", ensure quantity is 1 before adding to cart
+- Never call finish with success=false unless you have scrolled at least 3 times and tried multiple approaches`;
 
   // Build initial messages including the actual page context
   const messages = [
