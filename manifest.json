@@ -7,9 +7,13 @@
     "activeTab",
     "scripting",
     "storage",
-    "tabs"
+    "tabs",
+    "sidePanel"
   ],
   "host_permissions": ["<all_urls>"],
+  "side_panel": {
+    "default_path": "popup.html"
+  },
   "action": {
     "default_title": "BrowserMCP Agent",
     "default_icon": {

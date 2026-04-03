@@ -608,34 +608,13 @@ function sendToPopup(tabId, type, payload) {
   chrome.runtime.sendMessage({ type, tabId, ...payload }).catch(() => {});
 }
 
-// ─── Persistent window ───────────────────────────────────────────────────────
-// Opens the agent as a standalone window that stays open when you click the page.
+// ─── Side Panel setup ─────────────────────────────────────────────────────────
+// Opens the agent as a side panel docked to the right of the active tab.
 
-let agentWindowId = null;
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
-chrome.action.onClicked.addListener(async (tab) => {
-  // If window already open, focus it
-  if (agentWindowId !== null) {
-    try {
-      await chrome.windows.update(agentWindowId, { focused: true });
-      return;
-    } catch (_) {
-      agentWindowId = null; // window was closed, create new one
-    }
-  }
-
-  const win = await chrome.windows.create({
-    url: chrome.runtime.getURL('popup.html'),
-    type: 'popup',
-    width: 420,
-    height: 640,
-    focused: true,
-  });
-  agentWindowId = win.id;
-});
-
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (windowId === agentWindowId) agentWindowId = null;
+chrome.action.onClicked.addListener((tab) => {
+  chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
 });
 
 // ─── Message handler ──────────────────────────────────────────────────────────
