@@ -136,6 +136,14 @@ const BROWSER_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'add_to_cart',
+      description: 'Click the "Add to Cart" button on the current product page. Use this specifically when you are on a product page and want to add it to the cart. It searches for "Add to cart", "ADD TO CART", "Add To Cart" buttons including sticky footer buttons.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'dismiss_dialog',
       description: 'Dismiss any modal, popup, overlay, location dialog, notification prompt, or cookie banner visible on the page.',
       parameters: {
@@ -266,7 +274,10 @@ async function executeAction(tabId, tool, params) {
         const s = window.getComputedStyle(el);
         if (s.display === 'none' || s.visibility === 'hidden') return false;
         const r = el.getBoundingClientRect();
+        // Fixed/sticky elements may be outside normal scroll area but still on screen
+        if (s.position === 'fixed' || s.position === 'sticky') return r.width > 0 && r.height > 0;
         return r.width > 0 && r.height > 0;
+      }
       }
 
       function elText(el) {
@@ -430,6 +441,34 @@ async function executeAction(tabId, tool, params) {
             return { success: true, message: `Waited ${params.ms}ms` };
           }
 
+          case 'add_to_cart': {
+            // Try all common "Add to cart" button patterns including sticky footers
+            const cartTexts = ['add to cart', 'add to bag', 'add to basket'];
+            const allBtns = [...document.querySelectorAll('button, [role="button"], a')];
+            let cartBtn = null;
+            // Check fixed/sticky elements first (Flipkart sticky footer)
+            for (const btn of allBtns) {
+              const s = window.getComputedStyle(btn);
+              if (s.position !== 'fixed' && s.position !== 'sticky') continue;
+              const t = elText(btn).toLowerCase();
+              if (cartTexts.some(ct => t.includes(ct))) { cartBtn = btn; break; }
+            }
+            // Then check all visible elements
+            if (!cartBtn) {
+              for (const btn of allBtns) {
+                if (!isVisible(btn)) continue;
+                const t = elText(btn).toLowerCase();
+                if (cartTexts.some(ct => t.includes(ct))) { cartBtn = btn; break; }
+              }
+            }
+            if (!cartBtn) return { success: false, error: 'Add to Cart button not found. Try scrolling down first.' };
+            cartBtn.scrollIntoView({ block: 'center' });
+            await sleep(300);
+            cartBtn.click();
+            cartBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            return { success: true, message: `Clicked "Add to cart": "${elText(cartBtn).slice(0,40)}"` };
+          }
+
           case 'dismiss_dialog': {
             const strategy = params.strategy;
 
@@ -566,9 +605,9 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
 - For price-filtered tasks (e.g. "book under 500 rupees"): sort by "Price -- Low to High" first, then find the first matching item
 - To sort on Flipkart: click "Price -- Low to High" tab below the search bar
 - Prices appear as ₹499, Rs.500, 500 etc. — treat them the same; "under 500" means price < 500
-- To add to cart: click the product → wait for product page → **scroll down** to find "Add to Cart" button (it is below delivery details on Flipkart) → click it → verify cart updated
-- On Flipkart product pages: scroll down at least 2 times to reveal "Add to Cart" / "ADD TO CART" button before giving up
-- The "Add to Cart" button on Flipkart may be a blue/yellow button below "Delivery details" — scroll until you see it then click it
+- To add to cart on a product page: use the add_to_cart tool — it finds the button automatically including Flipkart's sticky footer
+- Do NOT use click tool for "Add to cart" — always use the add_to_cart tool when on a product page
+- After add_to_cart succeeds, take a screenshot to confirm the cart updated
 - If the first item isn't what's wanted, scroll down and try the next one
 - Do NOT give up after 1-2 scrolls — scroll multiple times and check each result
 - Quantity: if user says "only 1", ensure quantity shows 1 before adding
@@ -671,6 +710,7 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
         result = await executeAction(tabId, toolName, params);
         if (toolName === 'navigate') await sleep(2500);
         else if (toolName === 'click') await sleep(1200);
+        else if (toolName === 'add_to_cart') await sleep(1500);
         else if (toolName === 'dismiss_dialog') await sleep(800);
       } catch (e) {
         result = { success: false, error: e.message };
@@ -686,6 +726,7 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
 function formatActionMessage(tool, params) {
   switch (tool) {
     case 'search': return `Searching for "${params.query}"`;
+    case 'add_to_cart': return 'Adding to cart...';
     case 'click': return `Clicking "${params.text || params.selector}"`;
     case 'type_text': return `Typing "${params.text}"`;
     case 'press_key': return `Pressing ${params.key}`;
