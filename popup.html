@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BrowserMCP Agent</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-logo">
+        <span class="logo-icon">⚡</span>
+        <span class="logo-text">BrowserMCP</span>
+      </div>
+      <button class="btn-settings" id="btnSettings" title="Settings">⚙</button>
+    </header>
+
+    <!-- Settings panel (hidden by default) -->
+    <div class="settings-panel" id="settingsPanel" hidden>
+      <label class="field-label" for="apiKeyInput">OpenAI API Key</label>
+      <div class="api-key-row">
+        <input
+          type="password"
+          id="apiKeyInput"
+          class="input-field"
+          placeholder="sk-..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="btn-save" id="btnSaveKey">Save</button>
+      </div>
+      <p class="settings-hint">Your key is stored locally in Chrome storage and never sent anywhere except OpenAI.</p>
+    </div>
+
+    <!-- Log / conversation -->
+    <div class="log" id="log">
+      <div class="log-welcome">
+        <p>Type a task below and I'll perform it on the current page.</p>
+        <p class="log-examples">Examples:<br/>
+          "Search for iPhone 15 on Flipkart"<br/>
+          "Add the cheapest laptop to cart"<br/>
+          "Find flights from Mumbai to Delhi"
+        </p>
+      </div>
+    </div>
+
+    <!-- Input area -->
+    <div class="input-area">
+      <textarea
+        id="promptInput"
+        class="prompt-input"
+        placeholder="What should I do on this page?"
+        rows="2"
+        spellcheck="false"
+      ></textarea>
+      <button class="btn-run" id="btnRun" title="Run (Ctrl+Enter)">
+        <span class="btn-run-icon" id="runIcon">▶</span>
+      </button>
+    </div>
+
+    <div class="footer">
+      <span id="statusBadge" class="badge badge-idle">Idle</span>
+      <span id="modelTag" class="model-tag">gpt-4o</span>
+    </div>
+
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
