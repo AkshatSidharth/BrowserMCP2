@@ -30,6 +30,21 @@ const BROWSER_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'search',
+      description: 'Type a search query into the search box AND submit it. Use this instead of type_text + press_key for all search operations. Finds the search input, types the query, and clicks the search button or presses Enter — all in one step.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'The search query to type and submit' },
+          selector: { type: 'string', description: 'Optional CSS selector for the search input. If omitted, auto-detects.' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'click',
       description: 'Click an element. Provide the CSS selector from get_page_content, and optionally visible text as a fallback.',
       parameters: {
@@ -320,6 +335,39 @@ async function executeAction(tabId, tool, params) {
       async function run() {
         switch (tool) {
 
+          case 'search': {
+            // Find the search input
+            const searchEl = await findEl(
+              params.selector || 'input[type="search"], input[name="q"], input[placeholder*="search" i], input[placeholder*="Search" i], input[type="text"]',
+              null
+            );
+            if (!searchEl) return { success: false, error: 'Search input not found' };
+            searchEl.scrollIntoView({ block: 'center' });
+            searchEl.focus();
+            await sleep(200);
+            // Type the query using React-compatible setter
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+            if (setter) setter.call(searchEl, params.query);
+            else searchEl.value = params.query;
+            searchEl.dispatchEvent(new Event('input', { bubbles: true }));
+            searchEl.dispatchEvent(new Event('change', { bubbles: true }));
+            await sleep(300);
+            // Try clicking the submit button first (more reliable than Enter)
+            const submitBtn = searchEl.closest('form')?.querySelector('button[type="submit"], button[aria-label*="search" i], [class*="search-btn" i], [class*="searchBtn" i]')
+              || document.querySelector('button[type="submit"]');
+            if (submitBtn) {
+              submitBtn.click();
+            } else {
+              // Fall back to Enter key
+              searchEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+              searchEl.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+              searchEl.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));
+              const form = searchEl.closest('form');
+              if (form) form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            }
+            return { success: true, message: `Searched for "${params.query}"` };
+          }
+
           case 'click': {
             const el = await findEl(params.selector, params.text);
             if (!el) return { success: false, error: `Element not found — selector: "${params.selector}", text: "${params.text}"` };
@@ -512,14 +560,16 @@ CRITICAL — "my" means the LOGGED-IN user, NOT the currently viewed page:
 - On HR tools like Keka, Darwinbox, etc: click "Me" in the left sidebar to get to the current user's own profile
 
 E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
-- To search: click the search bar → type_text → press_key Enter → wait 2000ms → screenshot
-- After results load, use get_page_content to read ALL product names and prices
-- For price matching (e.g. "500 rupees book"): scroll down to see more results, read prices (₹499, ₹500, ₹525), pick the CLOSEST match
-- Prices appear as ₹499, Rs.500, 500 etc. — treat them the same
-- To add to cart: click the product → wait for product page to load → click "Add to Cart" → verify
-- If exact price not found, pick the closest and tell the user which one you chose
-- Do NOT give up after 1-2 scrolls — scroll multiple times to see all results
-- Quantity: if user says "only 1", ensure quantity is 1 before adding to cart
+- To search: use the search tool (NOT type_text + press_key) — it types AND submits in one step
+- After search results load (wait 2000ms → screenshot): check if results match the query
+- If results don't match (e.g. searched "harry potter" but seeing unrelated books): click "Books" in the left sidebar filter, or sort by "Price -- Low to High"
+- For price-filtered tasks (e.g. "book under 500 rupees"): sort by "Price -- Low to High" first, then find the first matching item
+- To sort on Flipkart: click "Price -- Low to High" tab below the search bar
+- Prices appear as ₹499, Rs.500, 500 etc. — treat them the same; "under 500" means price < 500
+- To add to cart: click the product → wait for product page → click "Add to Cart" → verify cart updated
+- If the first item isn't what's wanted, scroll down and try the next one
+- Do NOT give up after 1-2 scrolls — scroll multiple times and check each result
+- Quantity: if user says "only 1", ensure quantity shows 1 before adding
 - Never call finish with success=false unless you have scrolled at least 3 times and tried multiple approaches`;
 
   // Build initial messages including the actual page context
@@ -633,6 +683,7 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
 
 function formatActionMessage(tool, params) {
   switch (tool) {
+    case 'search': return `Searching for "${params.query}"`;
     case 'click': return `Clicking "${params.text || params.selector}"`;
     case 'type_text': return `Typing "${params.text}"`;
     case 'press_key': return `Pressing ${params.key}`;
