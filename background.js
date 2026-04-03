@@ -451,7 +451,7 @@ async function callOpenAI(apiKey, messages, model, extraTools = []) {
       model,
       messages,
       tools,
-      tool_choice: 'auto',
+      tool_choice: 'required',
       max_tokens: 1500,
     }),
   });
@@ -546,10 +546,11 @@ CRITICAL — "my" means the LOGGED-IN user, NOT the currently viewed page:
 
     messages.push(msg);
 
-    // Plain text response (no tools)
+    // Fallback: model gave plain text with no tool calls (shouldn't happen with tool_choice=required)
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
-      notify('done', msg.content || 'Task complete.');
-      return;
+      // Force it to act by re-prompting
+      messages.push({ role: 'user', content: 'You must call a tool. Do not reply with text. Take a screenshot and then perform the action.' });
+      continue;
     }
 
     // Execute tool calls
