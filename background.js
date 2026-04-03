@@ -502,7 +502,14 @@ Rules:
 3. After each action take a screenshot to verify the result
 4. For search boxes: click field → type_text → press_key Enter
 5. If a click fails by selector, retry using the text parameter
-6. Never respond with plain text asking questions — always use tools and act`;
+6. Never respond with plain text asking questions — always use tools and act
+
+CRITICAL — "my" means the LOGGED-IN user, NOT the currently viewed page:
+- If the user says "my profile / my rewards / my leaves / my data" — you MUST navigate to the logged-in user's own section
+- Look for sidebar links like "Me", "My Profile", "Profile", or a user avatar/name in the top-right header that links to the logged-in user
+- The currently open page may be showing SOMEONE ELSE's profile — do NOT use that data for "my" requests
+- Always verify you are on the logged-in user's own page before reading their data
+- On HR tools like Keka, Darwinbox, etc: click "Me" in the left sidebar to get to the current user's own profile`;
 
   // Build initial messages including the actual page context
   const messages = [
