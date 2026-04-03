@@ -468,35 +468,58 @@ async function callOpenAI(apiKey, messages, model, extraTools = []) {
 async function runAgentLoop(tabId, prompt, apiKey, model = 'gpt-4o') {
   const notify = (status, message) => sendToPopup(tabId, 'AGENT_UPDATE', { status, message });
 
-  notify('thinking', 'Taking screenshot of page...');
+  // ── Capture initial page state before first OpenAI call ──────────────────
+  notify('thinking', 'Reading current page...');
 
-  const systemPrompt = `You are an expert AI browser agent. You control a real web browser by calling tools.
+  let initialContent = { url: 'unknown', title: 'unknown', pageText: '', elements: [] };
+  try {
+    await sleep(400);
+    initialContent = await getTabContent(tabId) || initialContent;
+  } catch (_) {}
 
-Your capabilities:
-- screenshot: See the current page visually (use this often!)
-- get_page_content: Get CSS selectors for elements to click/type
-- click: Click buttons, links, dropdowns
-- type_text: Type into search boxes and inputs
-- press_key: Press Enter, Escape, Arrow keys etc.
-- scroll: Scroll the page
-- navigate: Go to a URL directly
-- dismiss_dialog: Close popups, location dialogs, modals, cookie banners
-- finish: End the task
+  notify('thinking', 'Taking screenshot...');
+  await sleep(300);
+  const initialScreenshot = await captureScreenshot(tabId);
 
-Critical rules:
-1. ALWAYS take a screenshot first to see the page
-2. If you see ANY popup, dialog, modal, or overlay — dismiss it FIRST before doing anything else
-3. After every action that changes the page, take another screenshot to verify
-4. For search: click the search box → type_text → press_key Enter
-5. For Flipkart/Amazon: if you see a location dialog, dismiss it (Escape or close button)
-6. If a click fails, try with the text parameter instead of selector
-7. Be persistent — if one approach fails, try another
-8. Do NOT give up on redirects — navigate back or dismiss and retry
-9. Only call finish when you've truly completed the task or exhausted all options`;
+  const systemPrompt = `You are an expert AI browser agent controlling a real web browser.
 
+You ALWAYS act on the CURRENT page shown to you. Never ask the user for clarification — just look at the page and do the task.
+
+Tools:
+- screenshot: Take a fresh screenshot to see the current state
+- get_page_content: Get CSS selectors of interactive elements
+- click: Click any element (by selector or visible text)
+- type_text: Type into inputs/search boxes
+- press_key: Press Enter, Escape, Arrow keys
+- scroll: Scroll up/down/top/bottom
+- navigate: Go to a URL
+- dismiss_dialog: Close popups/modals/location dialogs
+- finish: Call when done (or truly stuck after many retries)
+
+Rules:
+1. The current page is already shown below — start acting immediately
+2. Dismiss any popups/dialogs/overlays FIRST before anything else
+3. After each action take a screenshot to verify the result
+4. For search boxes: click field → type_text → press_key Enter
+5. If a click fails by selector, retry using the text parameter
+6. Never respond with plain text asking questions — always use tools and act`;
+
+  // Build initial messages including the actual page context
   const messages = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: prompt },
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: `Current page: ${initialContent.url}\nTitle: ${initialContent.title}\n\nUser task: ${prompt}`,
+        },
+        ...(initialScreenshot ? [{
+          type: 'image_url',
+          image_url: { url: initialScreenshot, detail: 'high' },
+        }] : []),
+      ],
+    },
   ];
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
