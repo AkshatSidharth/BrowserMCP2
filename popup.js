@@ -31,9 +31,21 @@ async function init() {
     showNoKeyWarning();
   }
 
-  // Get current tab
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  currentTabId = tab?.id || null;
+  // Get the last focused non-popup browser window's active tab
+  // (the agent runs in its own popup window, so we must look at other windows)
+  const windows = await chrome.windows.getAll({ populate: true, windowTypes: ['normal'] });
+  const lastFocused = windows.sort((a, b) => (b.focused ? 1 : 0) - (a.focused ? 1 : 0));
+  let targetTab = null;
+  for (const win of lastFocused) {
+    const active = win.tabs?.find(t => t.active && !t.url?.startsWith('chrome-extension://'));
+    if (active) { targetTab = active; break; }
+  }
+  // Fallback: any normal tab
+  if (!targetTab) {
+    const [tab] = await chrome.tabs.query({ active: true, windowType: 'normal' });
+    targetTab = tab;
+  }
+  currentTabId = targetTab?.id || null;
 
   promptInput.focus();
 }
