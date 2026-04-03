@@ -439,7 +439,7 @@ async function executeAction(tabId, tool, params) {
 
 // ─── OpenAI call with vision ──────────────────────────────────────────────────
 
-async function callOpenAI(apiKey, messages, extraTools = []) {
+async function callOpenAI(apiKey, messages, model, extraTools = []) {
   const tools = [...BROWSER_TOOLS, ...extraTools];
   const resp = await fetch(OPENAI_API_URL, {
     method: 'POST',
@@ -504,7 +504,7 @@ Critical rules:
 
     let response;
     try {
-      response = await callOpenAI(apiKey, messages);
+      response = await callOpenAI(apiKey, messages, model);
     } catch (e) {
       notify('error', `OpenAI error: ${e.message}`);
       return;
