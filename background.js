@@ -448,7 +448,7 @@ async function callOpenAI(apiKey, messages, extraTools = []) {
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4.5',
+      model,
       messages,
       tools,
       tool_choice: 'auto',
@@ -465,7 +465,7 @@ async function callOpenAI(apiKey, messages, extraTools = []) {
 
 // ─── Agent loop ───────────────────────────────────────────────────────────────
 
-async function runAgentLoop(tabId, prompt, apiKey) {
+async function runAgentLoop(tabId, prompt, apiKey, model = 'gpt-4o') {
   const notify = (status, message) => sendToPopup(tabId, 'AGENT_UPDATE', { status, message });
 
   notify('thinking', 'Taking screenshot of page...');
@@ -621,8 +621,8 @@ chrome.action.onClicked.addListener((tab) => {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'RUN_AGENT') {
-    const { tabId, prompt, apiKey } = msg;
-    runAgentLoop(tabId, prompt, apiKey)
+    const { tabId, prompt, apiKey, model } = msg;
+    runAgentLoop(tabId, prompt, apiKey, model)
       .catch(err => sendToPopup(tabId, 'AGENT_UPDATE', { status: 'error', message: err.message }));
     sendResponse({ started: true });
     return false;

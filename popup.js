@@ -11,8 +11,10 @@ const btnRun       = document.getElementById('btnRun');
 const btnSettings  = document.getElementById('btnSettings');
 const settingsPanel= document.getElementById('settingsPanel');
 const apiKeyInput  = document.getElementById('apiKeyInput');
+const modelInput   = document.getElementById('modelInput');
 const btnSaveKey   = document.getElementById('btnSaveKey');
 const statusBadge  = document.getElementById('statusBadge');
+const modelTag     = document.getElementById('modelTag');
 const runIcon      = document.getElementById('runIcon');
 
 let isRunning = false;
@@ -21,17 +23,20 @@ let currentTabId = null;
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 async function init() {
-  // Load saved API key
-  const { openaiKey } = await chrome.storage.local.get('openaiKey');
+  const { openaiKey, openaiModel } = await chrome.storage.local.get(['openaiKey', 'openaiModel']);
+
   if (openaiKey) {
     apiKeyInput.value = openaiKey;
   } else {
-    // Show settings on first use
     settingsPanel.removeAttribute('hidden');
     showNoKeyWarning();
   }
 
-  // Side panel is attached to the current window — active tab is always correct
+  const model = openaiModel || 'gpt-4o';
+  modelInput.value = model;
+  modelTag.textContent = model;
+
+  // Side panel shares the browser window — active tab is always correct
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   currentTabId = tab?.id || null;
 
@@ -39,13 +44,11 @@ async function init() {
 }
 
 function showNoKeyWarning() {
-  const existing = document.querySelector('.no-key-warn');
-  if (existing) return;
+  if (document.querySelector('.no-key-warn')) return;
   const warn = document.createElement('div');
   warn.className = 'no-key-warn';
   warn.textContent = '⚠ Enter your OpenAI API key in Settings to get started.';
-  const inputArea = document.querySelector('.input-area');
-  inputArea.parentNode.insertBefore(warn, inputArea);
+  document.querySelector('.input-area').before(warn);
 }
 
 function removeNoKeyWarning() {
@@ -55,47 +58,33 @@ function removeNoKeyWarning() {
 // ─── Settings ────────────────────────────────────────────────────────────────
 
 btnSettings.addEventListener('click', () => {
-  if (settingsPanel.hasAttribute('hidden')) {
-    settingsPanel.removeAttribute('hidden');
-  } else {
-    settingsPanel.setAttribute('hidden', '');
-  }
+  settingsPanel.toggleAttribute('hidden');
 });
 
 btnSaveKey.addEventListener('click', async () => {
-  const key = apiKeyInput.value.trim();
+  const key   = apiKeyInput.value.trim();
+  const model = modelInput.value.trim() || 'gpt-4o';
   if (!key) return;
-  await chrome.storage.local.set({ openaiKey: key });
+  await chrome.storage.local.set({ openaiKey: key, openaiModel: model });
+  modelTag.textContent = model;
   settingsPanel.setAttribute('hidden', '');
   removeNoKeyWarning();
-  addLogEntry('done', '✓ API key saved.', 'System');
+  addLogEntry('done', `✓ Saved. Using ${model}.`, 'System');
 });
 
-apiKeyInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') btnSaveKey.click();
-});
+apiKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') btnSaveKey.click(); });
+modelInput.addEventListener('keydown',  e => { if (e.key === 'Enter') btnSaveKey.click(); });
 
 // ─── Log entries ─────────────────────────────────────────────────────────────
 
-const iconMap = {
-  user:     '💬',
-  thinking: '🧠',
-  acting:   '⚡',
-  done:     '✅',
-  error:    '❌',
-};
+const iconMap = { user: '💬', thinking: '🧠', acting: '⚡', done: '✅', error: '❌' };
 
 function addLogEntry(type, text, role, withSpinner = false) {
-  // Remove welcome message on first real entry
-  const welcome = log.querySelector('.log-welcome');
-  if (welcome) welcome.remove();
+  document.querySelector('.log-welcome')?.remove();
 
   const entry = document.createElement('div');
   entry.className = `log-entry entry-${type}`;
-
-  const roleLabel = role || ({
-    user: 'You', thinking: 'Agent', acting: 'Agent', done: 'Done', error: 'Error',
-  }[type] || type);
+  const roleLabel = role || ({ user: 'You', thinking: 'Agent', acting: 'Agent', done: 'Done', error: 'Error' }[type] || type);
 
   entry.innerHTML = `
     <div class="log-icon">${iconMap[type] || '•'}</div>
@@ -117,19 +106,14 @@ function updateLastEntry(entry, text, removeSpinner = true) {
 }
 
 function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ─── Status ──────────────────────────────────────────────────────────────────
 
 function setStatus(s) {
   statusBadge.className = `badge badge-${s}`;
-  const labels = { idle: 'Idle', thinking: 'Thinking', acting: 'Acting', done: 'Done', error: 'Error' };
-  statusBadge.textContent = labels[s] || s;
+  statusBadge.textContent = ({ idle:'Idle', thinking:'Thinking', acting:'Acting', done:'Done', error:'Error' }[s] || s);
 }
 
 // ─── Run agent ───────────────────────────────────────────────────────────────
@@ -142,7 +126,7 @@ async function runAgent() {
   const prompt = promptInput.value.trim();
   if (!prompt) return;
 
-  const { openaiKey } = await chrome.storage.local.get('openaiKey');
+  const { openaiKey, openaiModel } = await chrome.storage.local.get(['openaiKey', 'openaiModel']);
   if (!openaiKey) {
     settingsPanel.removeAttribute('hidden');
     addLogEntry('error', 'Please set your OpenAI API key first.');
@@ -168,6 +152,7 @@ async function runAgent() {
     tabId: currentTabId,
     prompt,
     apiKey: openaiKey,
+    model: openaiModel || 'gpt-4o',
   });
 }
 
@@ -175,7 +160,6 @@ async function runAgent() {
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type !== 'AGENT_UPDATE') return;
-
   const { status, message } = msg;
 
   if (status === 'thinking') {
@@ -225,11 +209,7 @@ function resetRunButton() {
 btnRun.addEventListener('click', runAgent);
 
 promptInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault();
-    runAgent();
-  }
-  // Auto-resize textarea
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runAgent(); }
   setTimeout(() => {
     promptInput.style.height = 'auto';
     promptInput.style.height = Math.min(promptInput.scrollHeight, 100) + 'px';
