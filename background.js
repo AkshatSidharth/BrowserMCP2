@@ -14,14 +14,6 @@ const BROWSER_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'screenshot',
-      description: 'Take a screenshot of the current page and analyze it visually. Use this to understand what is on screen — especially when the page has popups, redirects, dialogs, or dynamic content that is hard to parse from DOM alone. Always take a screenshot at the start and after any major action.',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'get_page_content',
       description: 'Get the current page URL, title, visible text, and all interactive elements (buttons, links, inputs) with their CSS selectors. Use this to get exact selectors for clicking and typing.',
       parameters: { type: 'object', properties: {} },
@@ -538,7 +530,7 @@ async function callOpenAI(apiKey, messages, model, extraTools = []) {
       model,
       messages,
       tools,
-      tool_choice: 'required',
+      tool_choice: 'auto',
       max_tokens: 1500,
     }),
   });
@@ -560,89 +552,79 @@ function withTimeout(promise, ms, fallback) {
 }
 
 // ─── Agent loop ───────────────────────────────────────────────────────────────
+// Stateless per-step design: fresh screenshot + page content injected before
+// every OpenAI call. No mid-conversation user messages — avoids format errors.
 
 async function runAgentLoop(tabId, prompt, apiKey, model = 'gpt-4o') {
   const notify = (status, message) => sendToPopup(tabId, 'AGENT_UPDATE', { status, message });
 
-  // ── Capture initial page state before first OpenAI call ──────────────────
-  notify('thinking', 'Reading current page...');
-
-  let initialContent = { url: 'unknown', title: 'unknown', pageText: '', elements: [] };
-  try {
-    await sleep(400);
-    initialContent = await withTimeout(getTabContent(tabId), 5000, initialContent) || initialContent;
-  } catch (_) {}
-
-  notify('thinking', 'Taking screenshot...');
-  await sleep(300);
-  const initialScreenshot = await withTimeout(captureScreenshot(tabId), 5000, null);
-
   const systemPrompt = `You are an expert AI browser agent controlling a real web browser.
+You ALWAYS act on the CURRENT page shown to you. Never ask the user questions — just look at the screenshot and act.
 
-You ALWAYS act on the CURRENT page shown to you. Never ask the user for clarification — just look at the page and do the task.
-
-Tools:
-- screenshot: Take a fresh screenshot to see the current state
-- get_page_content: Get CSS selectors of interactive elements
-- click: Click any element (by selector or visible text)
-- type_text: Type into inputs/search boxes
-- press_key: Press Enter, Escape, Arrow keys
+Tools available:
+- get_page_content: Get CSS selectors of all interactive elements for precise clicking/typing
+- search: Type a query into the search box AND submit it (use this for all searches)
+- click: Click any element by CSS selector or visible text
+- type_text: Type into an input field
+- press_key: Press Enter, Escape, Arrow keys etc.
 - scroll: Scroll up/down/top/bottom
-- navigate: Go to a URL
-- dismiss_dialog: Close popups/modals/location dialogs
-- finish: Call when done (or truly stuck after many retries)
+- navigate: Go to a URL directly
+- add_to_cart: Click the "Add to Cart" button on a product page (handles sticky footers)
+- dismiss_dialog: Close popups, modals, cookie banners, location dialogs
+- wait: Wait for page to load
+- finish: End the task with a summary
 
 Rules:
-1. The current page is already shown below — start acting immediately
-2. Dismiss any popups/dialogs/overlays FIRST before anything else
-3. After each action take a screenshot to verify the result
-4. For search boxes: click field → type_text → press_key Enter
-5. If a click fails by selector, retry using the text parameter
-6. Never respond with plain text asking questions — always use tools and act
+1. Always call get_page_content first to get accurate selectors before clicking
+2. Dismiss any visible popups or dialogs BEFORE doing anything else
+3. If a click fails by selector, retry using the text parameter
+4. Never give up without trying at least 3 different approaches
 
-CRITICAL — "my" means the LOGGED-IN user, NOT the currently viewed page:
-- If the user says "my profile / my rewards / my leaves / my data" — you MUST navigate to the logged-in user's own section
-- Look for sidebar links like "Me", "My Profile", "Profile", or a user avatar/name in the top-right header that links to the logged-in user
-- The currently open page may be showing SOMEONE ELSE's profile — do NOT use that data for "my" requests
-- Always verify you are on the logged-in user's own page before reading their data
-- On HR tools like Keka, Darwinbox, etc: click "Me" in the left sidebar to get to the current user's own profile
+CRITICAL — "my" = the LOGGED-IN user's data, NOT whoever's profile is currently open:
+- For "my profile/rewards/leaves": navigate to the logged-in user's own section first
+- On Keka/Darwinbox/HR tools: click "Me" in the sidebar to reach your own profile
 
-E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
-- To search: use the search tool (NOT type_text + press_key) — it types AND submits in one step
-- After search results load (wait 2000ms → screenshot): check if results match the query
-- If results don't match (e.g. searched "harry potter" but seeing unrelated books): click "Books" in the left sidebar filter, or sort by "Price -- Low to High"
-- For price-filtered tasks (e.g. "book under 500 rupees"): sort by "Price -- Low to High" first, then find the first matching item
-- To sort on Flipkart: click "Price -- Low to High" tab below the search bar
-- Prices appear as ₹499, Rs.500, 500 etc. — treat them the same; "under 500" means price < 500
-- To add to cart on a product page: use the add_to_cart tool — it finds the button automatically including Flipkart's sticky footer
-- Do NOT use click tool for "Add to cart" — always use the add_to_cart tool when on a product page
-- After add_to_cart succeeds, take a screenshot to confirm the cart updated
-- If the first item isn't what's wanted, scroll down and try the next one
-- Do NOT give up after 1-2 scrolls — scroll multiple times and check each result
-- Quantity: if user says "only 1", ensure quantity shows 1 before adding
-- Never call finish with success=false unless you have scrolled at least 3 times and tried multiple approaches`;
+E-COMMERCE (Flipkart, Amazon etc.):
+- Search: use the search tool, NOT type_text + press_key
+- After search: sort by "Price -- Low to High" to find cheapest items
+- Product page: use add_to_cart tool (NOT click) to add items to cart
+- Scroll through results before giving up on finding specific items
+- finish with failure only after 5+ real attempts`;
 
-  // Build initial messages including the actual page context
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: `Current page: ${initialContent.url}\nTitle: ${initialContent.title}\n\nUser task: ${prompt}`,
-        },
-        ...(initialScreenshot ? [{
-          type: 'image_url',
-          image_url: { url: initialScreenshot, detail: 'high' },
-        }] : []),
-      ],
-    },
-  ];
+  // Action history log — accumulates across steps as plain text
+  const actionLog = [];
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
-    notify('thinking', `Step ${iter + 1} — thinking...`);
+    notify('thinking', `Step ${iter + 1} — reading page...`);
 
+    // Take fresh screenshot + page content before every API call
+    await sleep(300);
+    const [screenshot, pageContent] = await Promise.all([
+      withTimeout(captureScreenshot(tabId), 5000, null),
+      withTimeout(getTabContent(tabId), 5000, { url: 'unknown', title: 'unknown', pageText: '' }),
+    ]);
+
+    // Build clean messages — no accumulation of tool chains
+    const userContent = [
+      {
+        type: 'text',
+        text: [
+          `Task: ${prompt}`,
+          `Current URL: ${pageContent.url}`,
+          `Page title: ${pageContent.title}`,
+          actionLog.length ? `\nActions taken so far:\n${actionLog.slice(-10).join('\n')}` : '',
+          `\nNow decide the next action to complete the task.`,
+        ].filter(Boolean).join('\n'),
+      },
+      ...(screenshot ? [{ type: 'image_url', image_url: { url: screenshot, detail: 'high' } }] : []),
+    ];
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent },
+    ];
+
+    notify('thinking', `Step ${iter + 1} — thinking...`);
     let response;
     try {
       response = await callOpenAI(apiKey, messages, model);
@@ -651,20 +633,16 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
       return;
     }
 
-    const choice = response.choices?.[0];
-    const msg = choice?.message;
+    const msg = response.choices?.[0]?.message;
     if (!msg) { notify('error', 'Empty response from OpenAI'); return; }
 
-    messages.push(msg);
-
-    // Fallback: model gave plain text with no tool calls (shouldn't happen with tool_choice=required)
+    // Model gave plain text — treat as final answer
     if (!msg.tool_calls || msg.tool_calls.length === 0) {
-      // Force it to act by re-prompting
-      messages.push({ role: 'user', content: 'You must call a tool. Do not reply with text. Take a screenshot and then perform the action.' });
-      continue;
+      notify('done', msg.content || 'Task complete.');
+      return;
     }
 
-    // Execute tool calls
+    // Execute all tool calls in this step
     for (const tc of msg.tool_calls) {
       const toolName = tc.function.name;
       let params = {};
@@ -675,62 +653,35 @@ E-COMMERCE TASKS (Flipkart, Amazon, Myntra, etc.):
         return;
       }
 
-      if (toolName === 'screenshot') {
-        notify('acting', 'Taking screenshot...');
-        await sleep(600);
-        const dataUrl = await withTimeout(captureScreenshot(tabId), 5000, null);
-        if (dataUrl) {
-          // Send screenshot as a vision message
-          messages.push({
-            role: 'tool',
-            tool_call_id: tc.id,
-            content: 'Screenshot taken.',
-          });
-          // Add the image as a follow-up user message so GPT-4o can see it
-          messages.push({
-            role: 'user',
-            content: [
-              { type: 'text', text: 'Here is the current screenshot of the browser:' },
-              { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
-            ],
-          });
-        } else {
-          messages.push({ role: 'tool', tool_call_id: tc.id, content: 'Screenshot failed — use get_page_content instead.' });
-        }
-        continue;
-      }
-
       if (toolName === 'get_page_content') {
-        notify('acting', 'Reading page elements...');
-        try {
-          await sleep(500);
-          const fresh = await withTimeout(getTabContent(tabId), 5000, { url: 'unknown', title: 'unknown', pageText: '', elements: [] });
-          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(fresh) });
-        } catch (e) {
-          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: e.message }) });
-        }
+        // Already have it — just log it
+        actionLog.push(`[${iter + 1}] Read page content: ${pageContent.url}`);
         continue;
       }
 
-      // Browser actions
       notify('acting', formatActionMessage(toolName, params));
+      actionLog.push(`[${iter + 1}] ${formatActionMessage(toolName, params)}`);
+
       let result;
       try {
-        result = await withTimeout(executeAction(tabId, toolName, params), 8000, { success: false, error: 'Action timed out after 8s' });
+        result = await withTimeout(executeAction(tabId, toolName, params), 8000, { success: false, error: 'Timed out' });
+        if (result?.message) actionLog.push(`       → ${result.message}`);
+        if (!result?.success && result?.error) actionLog.push(`       ✗ ${result.error}`);
+        // Wait for page to settle after actions
         if (toolName === 'navigate') await sleep(2500);
-        else if (toolName === 'click') await sleep(1200);
-        else if (toolName === 'add_to_cart') await sleep(1500);
+        else if (toolName === 'search') await sleep(2000);
+        else if (toolName === 'click' || toolName === 'add_to_cart') await sleep(1200);
         else if (toolName === 'dismiss_dialog') await sleep(800);
+        else if (toolName === 'wait') await sleep(params.ms || 1000);
       } catch (e) {
-        result = { success: false, error: e.message };
+        actionLog.push(`       ✗ Error: ${e.message}`);
       }
-
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result || {}) });
     }
   }
 
-  notify('error', 'Reached maximum steps. Try breaking the task into smaller steps.');
+  notify('error', 'Reached maximum steps. Try a simpler task or break it into parts.');
 }
+
 
 function formatActionMessage(tool, params) {
   switch (tool) {
